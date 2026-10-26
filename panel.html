@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Panel · TuCola</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Nunito:wght@500;700;800&display=swap">
+<link rel="stylesheet" href="./estilo.css">
+</head>
+<body>
+<div class="wrap">
+  <section class="screen" id="login">
+    <div class="head"><div class="logo">TC</div><div><h2>Panel de sala</h2><p class="sub" id="login-slug"></p></div></div>
+    <div id="login-err" class="err" hidden></div>
+    <form id="login-form" style="display:flex;flex-direction:column;gap:10px">
+      <div><label for="pin">PIN del bar</label><input id="pin" type="password" inputmode="numeric" placeholder="····" required autocomplete="off"></div>
+      <button type="submit">Entrar</button>
+    </form>
+    <p class="note">El PIN te lo da TuCola al instalar. Si lo pierdes, escríbenos.</p>
+  </section>
+
+  <section class="screen" id="panel" hidden>
+    <div class="head">
+      <div class="logo" id="logo">··</div>
+      <div><h2 id="bar-name">Sala</h2><p class="sub" id="clock"></p></div>
+    </div>
+    <div id="err" class="err" hidden></div>
+    <div class="stats">
+      <div class="stat g"><div class="v" id="s-queue">0</div><div class="k">en cola</div></div>
+      <div class="stat o"><div class="v" id="s-rhythm">–</div><div class="k">ritmo peq. / grande</div></div>
+      <div class="stat p"><div class="v" id="s-clients">0</div><div class="k">clientes</div></div>
+    </div>
+    <div class="list" id="queue-list"></div>
+    <details>
+      <summary>+ Apuntar a mano (sin móvil)</summary>
+      <div class="row">
+        <div><label for="m-name">Nombre</label><input id="m-name" placeholder="Paco" maxlength="40"></div>
+        <div style="flex:0 0 90px"><label for="m-pax">Pers.</label><input id="m-pax" type="number" min="1" max="20" value="2"></div>
+      </div>
+      <button class="sm" type="button" id="m-add" style="margin-top:10px;width:100%">Añadir</button>
+    </details>
+    <div class="foot">
+      <span class="note" id="s-foot"></span>
+      <a class="note" id="cartel-link" href="#">Cartel con QR</a>
+    </div>
+    <div class="foot">
+      <span class="note" id="s-channel"></span>
+      <button class="grey sm" type="button" id="logout">Salir</button>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="./config.js"></script>
+<script src="./comun.js"></script>
+<script>
+const PINKEY = "tucola:pin:" + SLUG;
+let pin = null, data = null, timer = null, busy = new Set();
+try { pin = sessionStorage.getItem(PINKEY); } catch {}
+$("login-slug").textContent = SLUG ? "Bar: " + SLUG : "Falta el bar en el enlace";
+$("cartel-link").href = "./cartel.html?bar=" + SLUG;
+
+function showErr(id, msg) { const e = $(id); e.textContent = msg; e.hidden = !msg; }
+
+async function refresh() {
+  if (!pin) return;
+  try {
+    data = await rpc("staff_queue", { p_slug: SLUG, p_pin: pin });
+    showErr("err", ""); $("login").hidden = true; $("panel").hidden = false;
+    render();
+  } catch (e) {
+    if (String(e.message || "").includes("bad_pin")) { logout(); showErr("login-err", ERR.bad_pin); }
+    else showErr("err", errText(e));
+  }
+}
+function logout() { pin = null; try { sessionStorage.removeItem(PINKEY); } catch {} clearInterval(timer); $("panel").hidden = true; $("login").hidden = false; }
+
+function render() {
+  const now = Date.now(), b = data.bar;
+  $("bar-name").textContent = b.name;
+  $("logo").textContent = b.name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  $("clock").textContent = "Hoy · " + fmtTime();
+  $("s-queue").textContent = data.queue.length;
+  $("s-rhythm").textContent = `${data.rhythm_small}' / ${data.rhythm_large}'`;
+  $("s-clients").textContent = data.clients;
+  const t = data.today;
+  $("s-foot").textContent = `Hoy: ${t.seated} sentados · ${t.noshow} no vinieron · ${t.left} se fueron${t.avg_wait ? ` · espera media ${t.avg_wait}'` : ""}`;
+  $("s-channel").textContent = b.channel === "whatsapp" ? "Avisos por WhatsApp" : "Avisos por SMS";
+
+  const ql = $("queue-list");
+  if (!data.queue.length) { ql.innerHTML = '<div class="empty">Nadie en cola 🎉</div>'; return; }
+  ql.innerHTML = data.queue.map((q, i) => {
+    const wait = mins(now - new Date(q.joined_at));
+    const since = q.notified_at ? mins(now - new Date(q.notified_at)) : null;
+    const late = since !== null && since >= b.grace;
+    const chip = q.status === "notified"
+      ? `<span class="chip o">${q.has_phone ? "Avisado" : "Llamado"} ${since}'${late ? " · tarde" : ""}</span>`
+      : `<span class="chip g">${wait}' esperando</span>`;
+    const told = q.status === "waiting" ? (q.ahead === 0 ? "es el siguiente" : `le dijimos ${etaText(q.eta_low, q.eta_high)}`) : "";
+    const flags = [q.class === "large" ? '<span class="chip o" style="font-size:10px;padding:1px 7px">mesa grande</span>' : "",
+                   q.manual ? "sin móvil" : "", q.optin ? '<span class="chip p" style="font-size:10px;padding:1px 7px">ofertas</span>' : ""].filter(Boolean).join(" · ");
+    const errLine = q.notify_error ? `<div class="meta" style="color:var(--orange)">No se pudo enviar: ${q.notify_error}</div>` : "";
+    const dis = busy.has(q.id) ? "disabled" : "";
+    return `<div class="item ${q.status === "notified" ? "ready" : ""}">
+      <div><div class="name">${i + 1}. ${esc(q.name)}</div>
+      <div class="meta">${q.pax} pers. · ${fmtTime(q.joined_at)}${told ? " · " + told : ""}${flags ? " · " + flags : ""}</div>${errLine}</div>
+      <div>${chip}</div>
+      <div class="acts">
+        <button class="sm soft-o" ${dis} onclick="notify('${q.id}')">${q.status === "notified" ? "Avisar otra vez" : "Avisar"}</button>
+        <button class="sm" ${dis} onclick="act('${q.id}','seat')">Sentar</button>
+        <button class="sm grey" ${dis} onclick="act('${q.id}','noshow')">No viene</button>
+      </div></div>`;
+  }).join("");
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+async function act(id, action) {
+  busy.add(id); render();
+  try { await rpc("staff_action", { p_slug: SLUG, p_pin: pin, p_entry: id, p_action: action }); toast(action === "seat" ? "Sentado" : "Pasamos al siguiente"); }
+  catch (e) { showErr("err", errText(e)); }
+  busy.delete(id); await refresh();
+}
+async function notify(id) {
+  busy.add(id); render();
+  try {
+    const res = await fetch(`${C.SUPABASE_URL}/functions/v1/notify`, {
+      method: "POST", headers: { "Content-Type": "application/json", apikey: C.SUPABASE_KEY, Authorization: "Bearer " + C.SUPABASE_KEY },
+      body: JSON.stringify({ slug: SLUG, pin, entry_id: id }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (res.ok && out.sent) toast(`Aviso enviado por ${out.channel === "whatsapp" ? "WhatsApp" : "SMS"}`);
+    else if (res.ok && out.reason === "no_phone") toast("Sin móvil: avísale de viva voz");
+    else if (out.error === "twilio_not_configured") {
+      // aún sin Twilio: se marca como avisado para poder probar el flujo
+      await rpc("staff_action", { p_slug: SLUG, p_pin: pin, p_entry: id, p_action: "mark_notified" });
+      toast("Avisos aún no configurados: marcado como avisado");
+    } else showErr("err", "No se pudo enviar el aviso: " + (out.error || res.status));
+  } catch (e) { showErr("err", errText(e)); }
+  busy.delete(id); await refresh();
+}
+
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault(); pin = $("pin").value.trim();
+  try { sessionStorage.setItem(PINKEY, pin); } catch {}
+  await refresh();
+  if (!$("panel").hidden) { clearInterval(timer); timer = setInterval(refresh, 4000); }
+});
+$("m-add").addEventListener("click", async () => {
+  const name = $("m-name").value.trim(); if (!name) { $("m-name").focus(); return; }
+  try { await rpc("staff_manual_add", { p_slug: SLUG, p_pin: pin, p_name: name, p_pax: +$("m-pax").value || 2 }); $("m-name").value = ""; await refresh(); }
+  catch (e) { showErr("err", errText(e)); }
+});
+$("logout").addEventListener("click", logout);
+if (pin && SLUG) { refresh().then(() => { if (!$("panel").hidden) timer = setInterval(refresh, 4000); }); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>
