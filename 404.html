@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><title>TuCola</title>
+<script>
+// Enlaces bonitos en GitHub Pages: /tucola/<bar>, /tucola/<bar>/panel, /tucola/<bar>/cartel
+(function(){
+  var parts = location.pathname.split("/").filter(Boolean); // ["tucola","demo","panel"]
+  var root = "/" + (parts[0] || "") + "/";
+  var slug = (parts[1] || "").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  var sub = (parts[2] || "").toLowerCase();
+  if (!slug) { location.replace(root); return; }
+  var page = sub === "panel" ? "panel.html" : sub === "cartel" ? "cartel.html" : "cliente.html";
+  location.replace(root + page + "?bar=" + slug);
+})();
+</script></head><body>Cargando…</body></html>

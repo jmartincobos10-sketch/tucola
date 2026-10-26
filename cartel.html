@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cartel · TuCola</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@700;800&family=Nunito:wght@600;700;800&display=swap">
+<style>
+  body{margin:0;background:#eefaf3;font-family:"Nunito",system-ui,sans-serif;color:#111;padding:16px}
+  .cartel{max-width:420px;margin:0 auto;background:#fff;border:4px solid #0ea36f;border-radius:24px;padding:28px 22px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px}
+  h1{font-family:"Sora",sans-serif;font-size:34px;margin:0;line-height:1.1}
+  p{margin:0;font-weight:700;font-size:18px}
+  .qr{padding:8px;background:#fff}
+  .qr img{width:220px;height:220px;display:block}
+  .url{font-size:14px;color:#555;font-weight:600;word-break:break-all}
+  .small{font-size:15px;color:#0ea36f;font-weight:800}
+  .tools{max-width:420px;margin:14px auto 0;display:flex;gap:8px;justify-content:center}
+  button{font:inherit;font-weight:800;border:0;border-radius:12px;padding:12px 16px;background:#0ea36f;color:#fff;cursor:pointer}
+  @media print{ body{background:#fff;padding:0} .tools{display:none} .cartel{border-width:6px;max-width:none;min-height:95vh;justify-content:center} h1{font-size:52px} p{font-size:26px} .qr img{width:360px;height:360px} }
+</style>
+</head>
+<body>
+<div class="cartel">
+  <h1>¿Hay cola?</h1>
+  <p>Escanea, apúntate y vete a tomar algo.<br>Te avisamos al móvil cuando tu mesa esté lista.</p>
+  <div class="qr"><img id="qr" alt="Código QR para apuntarse a la cola"></div>
+  <p class="url" id="url"></p>
+  <p class="small">Sabrás cuánto te queda.</p>
+</div>
+<div class="tools"><button onclick="window.print()">Imprimir</button></div>
+<script>
+  const slug = (new URLSearchParams(location.search).get("bar") || "").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const base = location.pathname.replace(/[^/]*$/, ""); // carpeta donde vive la web
+  const url = location.origin + base + slug;
+  document.getElementById("url").textContent = url.replace(/^https?:\/\//, "");
+  // QR generado por un servicio público; para imprimir en calidad, el PNG de 600px basta
+  document.getElementById("qr").src = "https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=8&data=" + encodeURIComponent(url);
+</script>
+</body>
+</html>

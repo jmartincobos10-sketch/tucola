@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Cola · TuCola</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Nunito:wght@500;700;800&display=swap">
+<link rel="stylesheet" href="./estilo.css">
+</head>
+<body>
+<div class="wrap">
+  <section class="screen">
+    <div class="head">
+      <div class="logo" id="logo">··</div>
+      <div><h2 id="bar-name">Cargando…</h2><p class="sub" id="bar-addr"></p></div>
+    </div>
+
+    <div id="err" class="err" hidden></div>
+
+    <div class="hero" id="hero">
+      <div><div class="n" id="c-ahead">–</div><div class="k">grupos delante</div></div>
+      <div><div class="n" id="c-eta">–</div><div class="k">te quedan</div></div>
+      <div class="full" id="hero-text">Apúntate y vete a tomar algo. Te avisamos al móvil.</div>
+    </div>
+
+    <form id="join-form" hidden style="display:flex;flex-direction:column;gap:10px">
+      <div class="row">
+        <div><label for="c-name">Nombre</label><input id="c-name" placeholder="Marta" required maxlength="40" autocomplete="given-name"></div>
+        <div style="flex:0 0 110px"><label for="c-pax">Personas</label>
+          <select id="c-pax"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>10</option><option>12</option></select></div>
+      </div>
+      <div><label for="c-phone">Tu móvil</label><input id="c-phone" type="tel" placeholder="6XX XXX XXX" inputmode="tel" required autocomplete="tel"></div>
+      <label class="check" for="c-optin">
+        <input type="checkbox" id="c-optin">
+        <span>Quiero recibir las ofertas de este bar <small>Máximo 2 al mes. Puedes darte de baja en cualquier mensaje.</small></span>
+      </label>
+      <button type="submit" id="join-btn">Apuntarme a la cola</button>
+      <p class="note">Tu número se usa para avisarte hoy. Si no marcas la casilla, se borra a las 24 h.</p>
+    </form>
+
+    <div id="ticket" class="ticket" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="who" id="t-who"></span><span class="chip g" id="t-chip">En cola</span>
+      </div>
+      <p id="t-text"></p>
+      <p class="note" id="t-sub"></p>
+      <button class="grey sm" type="button" id="leave-btn">Salir de la cola</button>
+    </div>
+
+    <div id="done" hidden style="display:flex;flex-direction:column;gap:10px">
+      <p id="done-text" style="font-weight:700"></p>
+      <a id="review-link" hidden href="#" target="_blank" rel="noopener"><button class="purple" type="button" style="width:100%">Dejar una reseña en Google</button></a>
+      <button class="grey sm" type="button" id="again-btn">Apuntarme otra vez</button>
+    </div>
+
+    <p class="note" style="text-align:center">La página se actualiza sola. No hace falta recargar.</p>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="./config.js"></script>
+<script src="./comun.js"></script>
+<script>
+const KEY = "tucola:" + SLUG;
+let token = null, timer = null, state = null;
+try { token = localStorage.getItem(KEY); } catch {}
+
+function showErr(msg) { const e = $("err"); e.textContent = msg; e.hidden = !msg; }
+
+async function refresh() {
+  try {
+    state = await rpc("queue_state", { p_slug: SLUG, p_token: token || null });
+    showErr("");
+    render();
+  } catch (e) {
+    showErr(errText(e));
+    if (String(e.message || "").includes("bar_not_found")) clearInterval(timer);
+  }
+}
+
+function render() {
+  const b = state.bar, me = state.me;
+  $("bar-name").textContent = b.name;
+  $("bar-addr").textContent = b.address || "";
+  $("logo").textContent = b.name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const hero = $("hero"), ticket = $("ticket");
+  hero.className = "hero"; ticket.className = "ticket";
+  $("join-form").hidden = true; ticket.hidden = true; $("done").hidden = true;
+
+  if (me && (me.status === "waiting" || me.status === "notified")) {
+    ticket.hidden = false;
+    $("t-who").textContent = `${me.name} · ${me.pax} pers.`;
+    if (me.status === "notified") {
+      hero.classList.add("ready"); ticket.classList.add("ready");
+      $("c-ahead").textContent = "¡Ya!"; $("c-eta").textContent = b.grace + "'";
+      $("hero-text").textContent = `Tu mesa está lista. Vuelve en ${b.grace} minutos.`;
+      $("t-chip").textContent = "Mesa lista"; $("t-chip").className = "chip o";
+      $("t-text").textContent = "Pregunta por tu nombre en la barra.";
+      $("t-sub").textContent = `Te avisamos a las ${fmtTime(me.notified_at)}.`;
+    } else {
+      $("c-ahead").textContent = me.ahead; $("c-eta").textContent = etaText(me.eta_low, me.eta_high);
+      $("hero-text").textContent = me.ahead === 0 ? "Eres el siguiente. No te alejes." : "Vete a tomar algo. Te avisamos al móvil.";
+      $("t-chip").textContent = "En cola"; $("t-chip").className = "chip g";
+      $("t-text").textContent = me.ahead === 0 ? "Eres el siguiente" : `Vas el ${me.ahead + 1}.º de ${me.class === "large" ? "mesa grande" : "mesa pequeña"} · unos ${me.eta_low}-${me.eta_high} min`;
+      $("t-sub").textContent = `Apuntado a las ${fmtTime(me.joined_at)}. El tiempo sale de lo que tarda este bar en liberar mesas.`;
+    }
+    return;
+  }
+  if (me && me.status === "seated") {
+    hero.classList.add("done");
+    $("c-ahead").textContent = "🍻"; $("c-eta").textContent = "";
+    $("hero-text").textContent = "Que aproveche.";
+    $("done").hidden = false;
+    $("done-text").textContent = "Ya estás sentado. Si te ha gustado, una reseña nos ayuda mucho.";
+    const rl = $("review-link"); rl.hidden = !b.review_url; if (b.review_url) rl.href = b.review_url;
+    return;
+  }
+  if (me && (me.status === "noshow" || me.status === "left")) {
+    $("done").hidden = false; $("review-link").hidden = true;
+    $("done-text").textContent = me.status === "noshow" ? "Te avisamos y no llegaste a tiempo, así que pasamos al siguiente. Puedes apuntarte otra vez." : "Saliste de la cola.";
+  } else {
+    $("join-form").hidden = false;
+  }
+  $("c-ahead").textContent = state.ahead; $("c-eta").textContent = etaText(state.eta_low, state.eta_high);
+  $("hero-text").textContent = state.ahead === 0 ? "Ahora mismo no hay cola. Apúntate y entras el primero." : "Apúntate y vete a tomar algo. Te avisamos al móvil.";
+}
+
+$("join-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("join-btn"); btn.disabled = true; btn.textContent = "Apuntando…";
+  try {
+    const r = await rpc("join_queue", { p_slug: SLUG, p_name: $("c-name").value.trim(), p_pax: +$("c-pax").value, p_phone: $("c-phone").value, p_optin: $("c-optin").checked });
+    token = r.token; try { localStorage.setItem(KEY, token); } catch {}
+    await refresh();
+  } catch (err) { showErr(errText(err)); }
+  btn.disabled = false; btn.textContent = "Apuntarme a la cola";
+});
+$("leave-btn").addEventListener("click", async () => {
+  try { await rpc("leave_queue", { p_token: token }); await refresh(); toast("Has salido de la cola"); } catch (e) { showErr(errText(e)); }
+});
+$("again-btn").addEventListener("click", () => { token = null; try { localStorage.removeItem(KEY); } catch {} refresh(); });
+
+if (!SLUG) { showErr("Falta el nombre del bar en el enlace."); }
+else { refresh(); timer = setInterval(refresh, C.POLL_MS); document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); }); }
+</script>
+</body>
+</html>
